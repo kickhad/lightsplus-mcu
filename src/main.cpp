@@ -1,3 +1,4 @@
+#include <main.h>
 #include <SPI.h>
 #include "SPIFFS.h"
 // For Wifi Server

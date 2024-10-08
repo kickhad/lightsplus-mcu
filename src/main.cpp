@@ -1,225 +1,319 @@
-#include <main.h>
-#include <SPI.h>
-#include "SPIFFS.h"
-// For Wifi Server
+/*
+This example uses FreeRTOS softwaretimers as there is no built-in Ticker library
+*/
+
+
 #include <WiFi.h>
-char ssid[] = "";  // your network SSID (name)
+extern "C" {
+	#include "freertos/FreeRTOS.h"
+	#include "freertos/timers.h"
+}
+#include <AsyncMqttClient.h>
 
-char pass[] = "";  // your network passwords
+#define WIFI_SSID "iothell"
+#define WIFI_PASSWORD "51teertsmoT"
+
+#define MQTT_HOST IPAddress(91,121,93,94)
+#define MQTT_PORT 1883
+
+AsyncMqttClient mqttClient;
+TimerHandle_t mqttReconnectTimer;
+TimerHandle_t wifiReconnectTimer;
 
 
-// For LED strips
-#include <FastLED.h>
-#include <ESPAsyncWebServer.h>
-
-// char ssid[] = "";  // your network SSID (name)
-// char pass[] = "";  // your network password
-
-int keyIndex = 0;  // your network key Index number (needed only for WEP)
-int currentLED = 0;
-#define LED_PIN 4
-#define LED_PIN2 15
-#define NUM_LEDS 1500
-int status = WL_IDLE_STATUS;
-CRGB leds[NUM_LEDS];
-CRGB leds2[NUM_LEDS];
-
-//WiFiServer server(80);
-AsyncWebServer server(80);
-
-void setup() {
-
-  setupVGA();
-  //Initialize serial and wait for port to open:
-
-  Serial.begin(9600);
-  // attempt to connect to Wifi network:
-  while (status != WL_CONNECTED) {
-    Serial.print("Attempting to connect to SSID: ");
-    Serial.println(ssid);
-
-    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
-
-    status = WiFi.begin(ssid, pass);
-    status = WiFi.waitForConnectResult();
-
-    // wait 10 seconds for connection:
-    Serial.print("Status was ");
-    Serial.println(status);
-
-    delay(5000);
-  }
-
-  setupRoutes();
-  startServer();
-
-  FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS);
-  // FastLED.addLeds<WS2812, LED_PIN2, GRB>(leds2, NUM_LEDS);
-  for (int i = 0; i <= NUM_LEDS - 1; i++) {
-    leds[i] = CRGB(0, 0, 0);
-    leds2[i] = CRGB(0, 0, 0);
-  }
-  FastLED.show();
-
-  printWifiStatus();
+// Helper function to find the length of a string
+int string_length(const char* str) {
+    int len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
 }
 
-
-void loop() {
-
-
-  // listen for incoming clients
-
-
-  webserverstuff();
-  // for (int i = 0; i <= NUM_LEDS  -1 ; i++) {
-  // if (currentLED == 0)
-  // {
-  //   leds[i] = CRGB ( 16, 0, 0);
-  //   leds2[i] = CRGB ( 16, 0, 0);
-  // }
-  // else if (currentLED == 1)
-  // {
-  //   leds[i] = CRGB ( 0, 255, 0);
-  //   leds2[i] = CRGB ( 0, 255, 0);
-
-  // }
-  // else if (currentLED == 2)
-  // {
-  //   leds[i] = CRGB ( 0, 0, 255);
-  //   leds2[i] = CRGB ( 0, 0, 255);
-
-  // }
-// }
-//FastLED.show();
-
-// currentLED++;
-// if (currentLED == 3)
-//   currentLED = 0;
-
-delay(100);
-// Serial.println("client disconnected");
+// Helper function to convert a substring to an integer
+int string_to_int(const char* str, int start, int end) {
+    int result = 0;
+    for (int i = start; i < end; i++) {
+        result = result * 10 + (str[i] - '0');
+    }
+    return result;
 }
 
-void webserverstuff() {
-}
-
-void handleRoot(AsyncWebServerRequest *request) {
-  request->send(200, "text/plain", "Hello from ESP32 Board Game Light Controller!");
-}
-
-void handleReset(AsyncWebServerRequest *request) {
-  request->send(200, "text/plain", "All lights turning off.");
-  for (int i = 0; i <= NUM_LEDS - 1; i++) {
-    leds[i] = CRGB(0, 0, 0);
-    leds2[i] = CRGB(0, 0, 0);
-  }
-  FastLED.show();
-  request->send(200, "text/plain", "All lights off!");
-}
-
-void handleListData(AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Parsing list data");
-    // Take post data and dump in file
-
-    request->send(200, "text/plain", "List data finished.");
-}
-
-void handleApp(AsyncWebServerRequest *request) {
-  // Send HTML file with javascript
-  request->send(SPIFFS, "/index.html", String());
-}
-
-
-void setupRoutes() {
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/reset", HTTP_GET, handleReset);
-  server.on("/postlistdata", HTTP_POST, handleListData);
-  server.on("/app", HTTP_GET, handleApp);
-  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/style.css", "text/css");
-  });  
-  // Put this routing somewhere else
-  server.on("/lightset", HTTP_GET, [](AsyncWebServerRequest *request) {
-    int paramsNr = request->params();
-    Serial.println(paramsNr);
-
-    for (int i = 0; i < paramsNr; i++) {
-
-      AsyncWebParameter *p = request->getParam(i);
-      Serial.println(p->value());
-      if (p->name() == "on") {
-        leds[p->value().toInt()] = CRGB(255, 255, 255);
-        Serial.println("Turned on");
-        FastLED.show();
-      }
-      if (p->name() == "off") {
-        leds[p->value().toInt()] = CRGB(0, 0, 0);
-        Serial.println("Turned off");
-        FastLED.show();
-      }
-      // Test code for params
-      // Serial.print("Param name: ");
-      // Serial.println(p->name());
-      // Serial.print("Param value: ");
-      // Serial.println(p->value());
-      // Serial.println("------");
+// Main function to parse the integer array
+int* parse_int_array(const char* input, int* size) {
+    int len = string_length(input);
+    int* int_array = (int*)malloc(len * sizeof(int)); // Worst case: every character is a digit
+    if (int_array == NULL) {
+        *size = 0;
+        return NULL;
     }
 
-    request->send(200, "text/plain", "message received");
-  });
+    int index = 0;
+    int start = 0;
+    bool in_number = false;
+
+    for (int i = 0; i <= len; i++) {
+        if (input[i] >= '0' && input[i] <= '9') {
+            if (!in_number) {
+                start = i;
+                in_number = true;
+            }
+        } else {
+            if (in_number) {
+                int end = i;
+                int_array[index++] = string_to_int(input, start, end);
+                in_number = false;
+            }
+        }
+    }
+
+    *size = index;
+    return int_array;
 }
 
-void startServer() {
-  server.begin();
-  Serial.println("Server started");
-}
-void printWifiStatus() {
 
 
-  // print the SSID of the network you're attached to:
-
-
-  Serial.print("SSID: ");
-
-
-  Serial.println(WiFi.SSID());
-
-
-  // print your WiFi shield's IP address:
-
-
-  IPAddress ip = WiFi.localIP();
-
-
-  Serial.print("IP Address: ");
-
-
-  Serial.println(ip);
-  // Send it to the VGA screen
-  PrintIPtoVGA(ip);
-
-  // print the received signal strength:
-
-
-  long rssi = WiFi.RSSI();
-
-
-  Serial.print("signal strength (RSSI):");
-
-
-  Serial.print(rssi);
-
-
-  Serial.println(" dBm");
+void connectToWifi() {
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
-void setupVGA()
-{
+void connectToMqtt() {
+  Serial.println("Connecting to MQTT...");
+  mqttClient.connect();
+}
+
+void WiFiEvent(WiFiEvent_t event) {
+    Serial.printf("[WiFi-event] event: %d\n", event);
+    switch(event) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+        Serial.println("WiFi connected");
+        Serial.println("IP address: ");
+        Serial.println(WiFi.localIP());
+        connectToMqtt();
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.println("WiFi lost connection");
+        xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+        xTimerStart(wifiReconnectTimer, 0);
+        break;
+    }
+}
+
+void onMqttConnect(bool sessionPresent) {
+  Serial.println("Connected to MQTT.");
+  Serial.print("Session present: ");
+  Serial.println(sessionPresent);
+  uint16_t packetIdSub = mqttClient.subscribe("lightsplus-20241007/a2", 2);
+  Serial.print("Subscribing at QoS 2, packetId: ");
+  Serial.println(packetIdSub);
+  mqttClient.publish("lightsplus-20241007/a2", 0, true, "test 1");
+  Serial.println("Publishing at QoS 0");
+  uint16_t packetIdPub1 = mqttClient.publish("lightsplus-20241007/a2", 1, true, "test 2");
+  Serial.print("Publishing at QoS 1, packetId: ");
+  Serial.println(packetIdPub1);
+  uint16_t packetIdPub2 = mqttClient.publish("lightsplus-20241007/a2", 2, true, "test 3");
+  Serial.print("Publishing at QoS 2, packetId: ");
+  Serial.println(packetIdPub2);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  Serial.println("Disconnected from MQTT.");
+
+
+  if (WiFi.isConnected()) {
+    xTimerStart(mqttReconnectTimer, 0);
+  }
+}
+
+void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
+  Serial.println("Subscribe acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+  Serial.print("  qos: ");
+  Serial.println(qos);
+}
+
+void onMqttUnsubscribe(uint16_t packetId) {
+  Serial.println("Unsubscribe acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+}
+void printArray(int* arr, int size) {
+  for (int i = 0; i < size; i++) {
+    Serial.println(arr[i]);
+  }
+}
+void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+  Serial.println("Publish received.");
+  Serial.print("  topic: ");
+  Serial.println(topic);
+  Serial.print("  qos: ");
+  Serial.println(properties.qos);
+  Serial.print("  dup: ");
+  Serial.println(properties.dup);
+  Serial.print("  retain: ");
+  Serial.println(properties.retain);
+  Serial.print("  len: ");
+  Serial.println(len);
+  Serial.print("  index: ");
+  Serial.println(index);
+  Serial.print("  total: ");
+  Serial.println(total);
+  int size;
+  int* int_array = parse_int_array(payload, &size);
+  if (int_array != NULL) {
+        for (int i = 0; i < size; i++) {
+            Serial.print(int_array[i]);
+            Serial.print(" ");
+        }
+        Serial.println();
+        free(int_array);
+  }
 
 
 }
-void PrintIPtoVGA(IPAddress ip)
-{
 
+void onMqttPublish(uint16_t packetId) {
+  Serial.println("Publish acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
 }
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println();
+
+  mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
+  wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToWifi));
+
+  WiFi.onEvent(WiFiEvent);
+
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.onSubscribe(onMqttSubscribe);
+  mqttClient.onUnsubscribe(onMqttUnsubscribe);
+  mqttClient.onMessage(onMqttMessage);
+  mqttClient.onPublish(onMqttPublish);
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+
+  connectToWifi();
+}
+
+void loop() {
+}
+
+
+// #include <Arduino.h>
+// #include <WiFi.h>
+// #include <PubSubClient.h>
+// #include "secrets.h"
+// #include <FastLED.h>
+// WiFiClient espClient;
+// PubSubClient client(espClient);
+
+// // FastLED setup
+// #define NUM_LEDS 10
+// #define DATA_PIN 17 // Change this to the pin your LED strip is connected to
+// CRGB leds[NUM_LEDS];
+
+// void setup_wifi() {
+//   delay(10);
+//   Serial.println();
+//   Serial.print("Connecting to ");
+//   Serial.println(ssid);
+
+//   WiFi.begin(ssid, password);
+
+//   while (WiFi.status() != WL_CONNECTED) {
+//     delay(500);
+//     Serial.print(".");
+//   }
+
+//   Serial.println("");
+//   Serial.println("WiFi connected");
+//   Serial.println("IP address: ");
+//   Serial.println(WiFi.localIP());
+// }
+
+// void turnOnLEDs(int* intArray, int size) {
+//   // Turn off all LEDs
+//   FastLED.clear();
+
+//   // Turn on the specified LEDs
+//   for (int i = 0; i < size; i++) {
+//     if (intArray[i] >= 0 && intArray[i] < NUM_LEDS) {
+//       leds[intArray[i]] = CRGB::White;  // Change color as needed
+//     }
+//   }
+
+//   // Show the updated LED state
+//   FastLED.show();
+// }
+
+// void callback(char* topic, byte* payload, unsigned int length) {
+//   Serial.print("Message arrived [");
+//   Serial.print(topic);
+//   Serial.print("] ");
+
+//   // Convert payload to a string
+//   String message = "";
+//   for (int i = 0; i < length; i++) {
+//     message += (char)payload[i];
+//   }
+//   Serial.println(message);
+
+//   // Split the message into an array of integers
+//   int intArray[10]; // Adjust the size as needed
+//   int index = 0;
+//   char* token = strtok((char*)message.c_str(), ",");
+//   while (token != NULL && index < 10) {
+//     intArray[index++] = atoi(token);
+//     token = strtok(NULL, ",");
+//   }
+
+//   // Print the integer array
+//   Serial.print("Parsed integers: ");
+//   for (int i = 0; i < index; i++) {
+//     Serial.print(intArray[i]);
+//     Serial.print(" ");
+//   }
+//   Serial.println();
+
+//   // Turn on the LEDs based on the integer array
+//   turnOnLEDs(intArray, index);
+// }
+
+// void reconnect() {
+//   while (!client.connected()) {
+//     Serial.print("Attempting MQTT connection...");
+//     if (client.connect("ESP32Client")) {
+//       Serial.println("connected");
+//       client.subscribe(topic);
+//       Serial.println(topic);
+//     } else {
+//       Serial.print("failed, rc=");
+//       Serial.print(client.state());
+//       Serial.println(" try again in 5 seconds");
+//       delay(5000);
+//     }
+//   }
+// }
+
+// void setup() {
+//   Serial.begin(115200);
+//   setup_wifi();
+//   client.setServer(mqtt_server, mqtt_port);
+//   client.setCallback(callback);
+
+//   // Initialize FastLED
+//   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS);
+// }
+
+// void loop() {
+//   if (!client.connected()) {
+//     reconnect();
+//   }
+//   client.loop();
+// }

@@ -15,6 +15,27 @@ extern "C" {
 
 #define MQTT_HOST IPAddress(91,121,93,94)
 #define MQTT_PORT 1883
+#include "secrets.h"
+#include <FastLED.h>
+#define NUM_LEDS 30
+#define DATA_PIN 17 // Change this to the pin your LED strip is connected to
+CRGB leds[NUM_LEDS];
+
+void turnOnLEDs(int* intArray, int size) {
+  // Turn off all LEDs
+  FastLED.clear();
+
+  // Turn on the specified LEDs
+  for (int i = 0; i < size; i++) {
+    if (intArray[i] >= 0 && intArray[i] < NUM_LEDS) {
+      leds[intArray[i]] = CRGB::White;  // Change color as needed
+    }
+  }
+
+  // Show the updated LED state
+  FastLED.show();
+}
+
 
 AsyncMqttClient mqttClient;
 TimerHandle_t mqttReconnectTimer;
@@ -144,6 +165,22 @@ void printArray(int* arr, int size) {
     Serial.println(arr[i]);
   }
 }
+
+
+void updateLEDs(const int* intArray, int size) {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    bool ledShouldBeOn = false;
+    for (int j = 0; j < size; j++) {
+      if (i == intArray[j]) {
+        ledShouldBeOn = true;
+        break;
+      }
+    }
+    leds[i] = ledShouldBeOn ? CRGB::Blue : CRGB::Black;
+  }
+  FastLED.show();
+}
+
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
   Serial.println("Publish received.");
   Serial.print("  topic: ");
@@ -162,6 +199,8 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
   Serial.println(total);
   int size;
   int* int_array = parse_int_array(payload, &size);
+  updateLEDs(int_array,size);
+  
   if (int_array != NULL) {
         for (int i = 0; i < size; i++) {
             Serial.print(int_array[i]);
@@ -184,7 +223,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println();
-
+  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS);
   mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
   wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToWifi));
 
@@ -208,15 +247,12 @@ void loop() {
 // #include <Arduino.h>
 // #include <WiFi.h>
 // #include <PubSubClient.h>
-// #include "secrets.h"
-// #include <FastLED.h>
+
 // WiFiClient espClient;
 // PubSubClient client(espClient);
 
 // // FastLED setup
-// #define NUM_LEDS 10
-// #define DATA_PIN 17 // Change this to the pin your LED strip is connected to
-// CRGB leds[NUM_LEDS];
+
 
 // void setup_wifi() {
 //   delay(10);
